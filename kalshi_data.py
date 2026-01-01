@@ -4,13 +4,14 @@ from __future__ import annotations
 import base64
 import json
 import time
+from urllib.parse import urlparse
 from typing import Any, AsyncIterator
 
 import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from config import API, KALSHI_API_KEY, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PATH
+from config import API, KALSHI_API_KEY, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_B64, KALSHI_ORDER_URL
 
 _PRIVATE_KEY = None
 
@@ -18,10 +19,10 @@ _PRIVATE_KEY = None
 def _load_private_key() -> Any:
     global _PRIVATE_KEY
     if _PRIVATE_KEY is None:
-        with open(KALSHI_PRIVATE_KEY_PATH, "rb") as key_file:
-            _PRIVATE_KEY = serialization.load_pem_private_key(
-                key_file.read(), password=None
-            )
+        if not KALSHI_PRIVATE_KEY_B64:
+            raise RuntimeError("KALSHI_PRIVATE_KEY_B64 is not set")
+        key_bytes = base64.b64decode(KALSHI_PRIVATE_KEY_B64)
+        _PRIVATE_KEY = serialization.load_pem_private_key(key_bytes, password=None)
     return _PRIVATE_KEY
 
 
@@ -36,17 +37,28 @@ def sign_request(message: str) -> str:
     return base64.b64encode(signature).decode("utf-8")
 
 
-def build_ws_headers() -> dict[str, str]:
-    """Generates the required headers for the WebSocket Handshake."""
+def build_auth_payload() -> dict[str, Any]:
     timestamp = str(int(time.time() * 1000))
-    # CRITICAL: Signature message must be: timestamp + "GET" + "/trade-api/ws/v2"
-    msg = f"{timestamp}GET/trade-api/ws/v2"
-    signature = sign_request(msg)
-    
+    message = f"{timestamp}{KALSHI_API_KEY}"
+    signature = sign_request(message)
     return {
-        "KALSHI-ACCESS-KEY": KALSHI_API_KEY,
+        "id": KALSHI_KEY_ID,
+        "timestamp": timestamp,
+        "signature": signature,
+        "api_key": KALSHI_API_KEY,
+    }
+
+
+def build_ws_headers(ws_url: str) -> dict[str, str]:
+    """Build websocket auth headers using Kalshi's access signature scheme."""
+    parsed = urlparse(ws_url)
+    timestamp = str(int(time.time() * 1000))
+    message = f"{timestamp}GET{parsed.path}"
+    signature = sign_request(message)
+    return {
+        "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
+        "KALSHI-ACCESS-TIMESTAMP": timestamp,
         "KALSHI-ACCESS-SIGNATURE": signature,
-        "KALSHI-ACCESS-TIMESTAMP": timestamp
     }
 
 
@@ -54,17 +66,32 @@ async def kalshi_ws_stream(
     session: aiohttp.ClientSession,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield messages from the Kalshi websocket."""
-    
-    # 1. Generate Headers BEFORE connecting
-    headers = build_ws_headers()
-    
-    # 2. Connect WITH Headers (This fixes the 401)
+    headers = build_ws_headers(API.kalshi_ws_url)
     async with session.ws_connect(API.kalshi_ws_url, headers=headers, heartbeat=15) as ws:
-        # Note: We do NOT send the {"type": "auth"} message anymore. 
-        # The headers handle it.
-        
+        await ws.send_str(json.dumps({"type": "auth", "data": build_auth_payload()}))
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
                 yield json.loads(msg.data)
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
+
+
+async def place_limit_order(
+    session: aiohttp.ClientSession,
+    ticker: str,
+    side: str,
+    price: int,
+    quantity: int,
+) -> dict[str, Any]:
+    """Submit a limit order to Kalshi."""
+    payload = {
+        "ticker": ticker,
+        "side": side,
+        "type": "limit",
+        "price": price,
+        "count": quantity,
+    }
+    headers = {"Authorization": f"Bearer {KALSHI_API_KEY}"}
+    async with session.post(KALSHI_ORDER_URL, json=payload, headers=headers) as resp:
+        resp.raise_for_status()
+        return await resp.json()
