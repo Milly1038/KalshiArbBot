@@ -76,3 +76,5 @@ FILTERS = {
     "MIN_LIQUIDITY": 10,       # Lowered for sniping (we only need $2 liquidity)
     "MIN_PROFIT_PCT": 2.0      # Minimum edge to trigger
 }
+# config.py (Add this to the end of the file)
+KALSHI_MARKETS_URL = f"{API.kalshi_rest_base}/trade-api/v2/markets"
