@@ -16,6 +16,17 @@ from config import API, KALSHI_API_KEY, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_B64, K
 _PRIVATE_KEY = None
 
 
+def _ensure_credentials() -> None:
+    if not KALSHI_KEY_ID:
+        raise RuntimeError(
+            "KALSHI_KEY_ID is not set. This is the API key id shown in the Kalshi UI."
+        )
+
+
+def _api_key_value() -> str:
+    return KALSHI_API_KEY or KALSHI_KEY_ID
+
+
 def _load_private_key() -> Any:
     global _PRIVATE_KEY
     if _PRIVATE_KEY is None:
@@ -38,19 +49,22 @@ def sign_request(message: str) -> str:
 
 
 def build_auth_payload() -> dict[str, Any]:
+    _ensure_credentials()
     timestamp = str(int(time.time() * 1000))
-    message = f"{timestamp}{KALSHI_API_KEY}"
+    api_key = _api_key_value()
+    message = f"{timestamp}{api_key}"
     signature = sign_request(message)
     return {
         "id": KALSHI_KEY_ID,
         "timestamp": timestamp,
         "signature": signature,
-        "api_key": KALSHI_API_KEY,
+        "api_key": api_key,
     }
 
 
 def build_ws_headers(ws_url: str) -> dict[str, str]:
     """Build websocket auth headers using Kalshi's access signature scheme."""
+    _ensure_credentials()
     parsed = urlparse(ws_url)
     timestamp = str(int(time.time() * 1000))
     message = f"{timestamp}GET{parsed.path}"
@@ -84,6 +98,8 @@ async def place_limit_order(
     quantity: int,
 ) -> dict[str, Any]:
     """Submit a limit order to Kalshi."""
+    _ensure_credentials()
+    api_key = _api_key_value()
     payload = {
         "ticker": ticker,
         "side": side,
@@ -91,7 +107,7 @@ async def place_limit_order(
         "price": price,
         "count": quantity,
     }
-    headers = {"Authorization": f"Bearer {KALSHI_API_KEY}"}
+    headers = {"Authorization": f"Bearer {api_key}"}
     async with session.post(KALSHI_ORDER_URL, json=payload, headers=headers) as resp:
         resp.raise_for_status()
         return await resp.json()
