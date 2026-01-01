@@ -51,11 +51,14 @@ def _load_private_key() -> Any:
 
 
 def sign_request(message: str) -> str:
-    """Sign a payload with RSA-2048, returning base64."""
+    """Sign a payload with RSA-2048 (PSS), returning base64."""
     private_key = _load_private_key()
     signature = private_key.sign(
         message.encode("utf-8"),
-        padding.PKCS1v15(),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.DIGEST_LENGTH,
+        ),
         hashes.SHA256(),
     )
     return base64.b64encode(signature).decode("utf-8")
@@ -65,19 +68,6 @@ def _build_timestamp(unit: str) -> str:
     if unit == "s":
         return str(int(time.time()))
     return str(int(time.time() * 1000))
-
-
-def build_auth_payload(timestamp: str) -> dict[str, Any]:
-    _ensure_credentials()
-    api_key = _api_key_value()
-    message = f"{timestamp}{api_key}"
-    signature = sign_request(message)
-    return {
-        "id": KALSHI_KEY_ID,
-        "timestamp": timestamp,
-        "signature": signature,
-        "api_key": api_key,
-    }
 
 
 def build_ws_headers(ws_url: str, timestamp: str) -> dict[str, str]:
@@ -108,15 +98,11 @@ async def kalshi_ws_stream(
     ]
     for header_unit, payload_unit, use_headers in attempts:
         header_ts = _build_timestamp(header_unit)
-        payload_ts = _build_timestamp(payload_unit)
         headers = build_ws_headers(API.kalshi_ws_url, header_ts) if use_headers else None
         try:
             async with session.ws_connect(
                 API.kalshi_ws_url, headers=headers, heartbeat=15
             ) as ws:
-                await ws.send_str(
-                    json.dumps({"type": "auth", "data": build_auth_payload(payload_ts)})
-                )
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         yield json.loads(msg.data)
