@@ -18,12 +18,12 @@ API_CONFIGS = {
     "DEMO": ApiConfig(
         kalshi_rest_base="https://demo-api.kalshi.co",
         kalshi_ws_url="wss://demo-api.kalshi.co/ws",
-        odds_ws_url="wss://api.the-odds-api.com/v4/sports",  # placeholder
+        odds_ws_url="wss://app.oddsapi.io/ws/v1",
     ),
     "PROD": ApiConfig(
         kalshi_rest_base="https://api.kalshi.com",
         kalshi_ws_url="wss://api.kalshi.com/ws",
-        odds_ws_url="wss://api.the-odds-api.com/v4/sports",  # placeholder
+        odds_ws_url="wss://app.oddsapi.io/ws/v1",
     ),
 }
 
@@ -47,4 +47,10 @@ KELLY_MULTIPLIER = float(os.getenv("KELLY_MULTIPLIER", "0.2"))
 KALSHI_MARKETS_URL = f"{API.kalshi_rest_base}/trade-api/v2/markets"
 KALSHI_ORDER_URL = f"{API.kalshi_rest_base}/trade-api/v2/portfolio/orders"
 
-SHARP_BOOKS = {"DraftKings", "Pinnacle", "FanDuel"}
+SHARP_BOOKS = {
+    "draftkings",
+    "pinnacle",
+    "fanduel",
+    "betmgm",
+    "hardrockbet",
+}

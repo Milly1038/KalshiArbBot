@@ -17,8 +17,8 @@ async def odds_ws_feed(
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
                 payload = json.loads(msg.data)
-                book = payload.get("bookmaker")
-                if book in SHARP_BOOKS:
+                book = payload.get("bookmaker") or payload.get("bookmaker_key") or ""
+                if str(book).lower() in SHARP_BOOKS:
                     await queue.put(payload)
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
