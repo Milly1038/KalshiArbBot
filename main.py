@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import aiohttp
@@ -33,6 +35,52 @@ class BotState:
     def log(self, message: str) -> None:
         self.logs.append(message)
         self.logs[:] = self.logs[-10:]
+
+
+async def check_time_sync(state: BotState, session: aiohttp.ClientSession) -> None:
+    """Warn if system time is out of sync to avoid Kalshi 401s."""
+    try:
+        async with session.head("https://www.google.com", timeout=10) as resp:
+            date_header = resp.headers.get("Date")
+        if not date_header:
+            state.log("Time check: missing Date header from time source")
+            return
+        server_time = parsedate_to_datetime(date_header).timestamp()
+        local_time = time.time()
+        drift = abs(server_time - local_time)
+        if drift > 0.5:
+            state.log(
+                f"Time drift detected ({drift:.3f}s). 401s may occur if unsynced."
+            )
+            console.print(
+                f"[yellow]Time drift detected ({drift:.3f}s). "
+                "401s may occur if unsynced.[/yellow]"
+            )
+            await asyncio.to_thread(_attempt_time_sync, state)
+    except Exception as exc:  # noqa: BLE001 - best-effort warning
+        state.log(f"Time check failed: {exc}")
+
+
+def _attempt_time_sync(state: BotState) -> None:
+    """Attempt to enable NTP sync (best-effort)."""
+    import os
+    import subprocess
+
+    if os.geteuid() != 0:
+        state.log("Time sync skipped: requires root privileges")
+        return
+
+    commands = [
+        ["timedatectl", "set-ntp", "true"],
+        ["systemctl", "restart", "systemd-timesyncd"],
+    ]
+    for cmd in commands:
+        try:
+            subprocess.run(cmd, check=False, capture_output=True, text=True)
+        except FileNotFoundError:
+            state.log(f"Time sync tool missing: {cmd[0]}")
+            return
+    state.log("Attempted to enable system time sync (NTP).")
 
 
 def build_dashboard(state: BotState) -> Layout:
@@ -118,12 +166,8 @@ async def process_odds_feed(
                     state.session, market.ticker, "buy", int(kalshi_price), contracts
                 )
                 state.bankroll -= contracts
-                state.signals.append(
-                    {"market": market.ticker, "edge": edge, "size": size}
-                )
-                state.log(
-                    f"Sniped {market.ticker} @ {kalshi_price} for {contracts}"
-                )
+                state.signals.append({"market": market.ticker, "edge": edge, "size": size})
+                state.log(f"Sniped {market.ticker} @ {kalshi_price} for {contracts}")
 
         queue.task_done()
 
@@ -142,8 +186,9 @@ async def main() -> None:
 
     connector = aiohttp.TCPConnector(limit=0, ttl_dns_cache=300)
     async with aiohttp.ClientSession(connector=connector) as session:
-        await mapper.preload(session)
         state.session = session  # type: ignore[attr-defined]
+        await check_time_sync(state, session)
+        await mapper.preload(session)
         state.log("Loaded Kalshi markets into RAM")
 
         tasks = [
