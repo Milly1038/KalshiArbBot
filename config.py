@@ -18,12 +18,12 @@ API_CONFIGS = {
     "DEMO": ApiConfig(
         kalshi_rest_base="https://demo-api.kalshi.co",
         kalshi_ws_url="wss://demo-api.kalshi.co/ws",
-        odds_ws_url="wss://app.oddsapi.io/ws/v1",
+        odds_ws_url="wss://api.oddspapi.io/v4/ws",
     ),
     "PROD": ApiConfig(
         kalshi_rest_base="https://api.kalshi.com",
         kalshi_ws_url="wss://api.kalshi.com/ws",
-        odds_ws_url="wss://app.oddsapi.io/ws/v1",
+        odds_ws_url="wss://api.oddspapi.io/v4/ws",
     ),
 }
 
