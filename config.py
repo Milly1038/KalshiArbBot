@@ -1,61 +1,46 @@
-"""Centralized configuration for the sniper bot."""
-from __future__ import annotations
-
+"""Configuration settings for the sniper bot."""
 import os
-from dataclasses import dataclass
 
-from dotenv import load_dotenv
+# --- 1. AUTO-LOAD .ENV FILE ---
+# This manually reads your .env file so you don't need 'python-dotenv'
+if os.path.exists(".env"):
+    with open(".env", "r") as f:
+        for line in f:
+            line = line.strip()
+            # Skip comments and empty lines
+            if not line or line.startswith("#"):
+                continue
+            # Split on the first "=" to handle the long B64 key safely
+            if "=" in line:
+                key, value = line.split("=", 1)
+                # Remove quotes if present
+                value = value.strip('\'"')
+                os.environ[key] = value
 
-load_dotenv()
+# --- 2. AUTHENTICATION ---
+# These now come directly from your .env file
+KALSHI_KEY_ID = os.environ.get("KALSHI_KEY_ID")
+KALSHI_PRIVATE_KEY_B64 = os.environ.get("KALSHI_PRIVATE_KEY_B64")
+KALSHI_PRIVATE_KEY_PATH = None  # Disabled (we are using B64)
+KALSHI_API_KEY = None           # Not used for V2
 
-ENV = os.getenv("KALSHI_ENV", "DEMO").upper()
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 
+# --- 3. STRATEGY SETTINGS ---
+SHARP_BOOKS = ["betmgm", "kalshi", "fanduel", "draftkings", "hardrockbet"]
+BANKROLL = float(os.environ.get("BANKROLL", "500.0"))
+KELLY_MULTIPLIER = float(os.environ.get("KELLY_MULTIPLIER", "0.1"))
+EV_THRESHOLD = 0.02
 
-@dataclass(frozen=True)
-class ApiConfig:
-    kalshi_rest_base: str
-    kalshi_ws_url: str
-    odds_ws_url: str
+# --- 4. API ENDPOINTS ---
+class API:
+    # Kalshi V2 Production (Correct "elections" subdomain)
+    kalshi_ws_url = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+    kalshi_api_url = "https://api.elections.kalshi.com/trade-api/v2"
+    
+    # OddsPapi
+    odds_ws_url = "wss://api.oddspapi.io/v4/ws"
 
-
-API_CONFIGS = {
-    "DEMO": ApiConfig(
-        kalshi_rest_base="https://demo-api.kalshi.co",
-        kalshi_ws_url="wss://demo-api.kalshi.co/ws",
-        odds_ws_url="wss://api.oddspapi.io/v4/ws",
-    ),
-    "PROD": ApiConfig(
-        kalshi_rest_base="https://api.kalshi.com",
-        kalshi_ws_url="wss://api.kalshi.com/ws",
-        odds_ws_url="wss://api.oddspapi.io/v4/ws",
-    ),
-}
-
-_api_config = API_CONFIGS.get(ENV, API_CONFIGS["DEMO"])
-API = ApiConfig(
-    kalshi_rest_base=os.getenv("KALSHI_REST_BASE", _api_config.kalshi_rest_base),
-    kalshi_ws_url=os.getenv("KALSHI_WS_URL", _api_config.kalshi_ws_url),
-    odds_ws_url=os.getenv("ODDS_WS_URL", _api_config.odds_ws_url),
-)
-
-KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
-KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID", "")
-KALSHI_PRIVATE_KEY_B64 = os.getenv("KALSHI_PRIVATE_KEY_B64", "")
-KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "")
-
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
-
-BANKROLL = float(os.getenv("BANKROLL", "1000"))
-EV_THRESHOLD = float(os.getenv("EV_THRESHOLD", "0.05"))
-KELLY_MULTIPLIER = float(os.getenv("KELLY_MULTIPLIER", "0.2"))
-
-KALSHI_MARKETS_URL = f"{API.kalshi_rest_base}/trade-api/v2/markets"
-KALSHI_ORDER_URL = f"{API.kalshi_rest_base}/trade-api/v2/portfolio/orders"
-
-SHARP_BOOKS = {
-    "draftkings",
-    "pinnacle",
-    "fanduel",
-    "betmgm",
-    "hardrockbet",
-}
+# Derived URLs
+KALSHI_ORDER_URL = f"{API.kalshi_api_url}/portfolio/orders"
+KALSHI_MARKETS_URL = f"{API.kalshi_api_url}/markets"

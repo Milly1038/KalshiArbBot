@@ -30,16 +30,14 @@ def _ensure_credentials() -> None:
         )
 
 
-def _api_key_value() -> str:
-    return KALSHI_API_KEY or KALSHI_KEY_ID
-
-
 def _load_private_key() -> Any:
     global _PRIVATE_KEY
     if _PRIVATE_KEY is None:
         if KALSHI_PRIVATE_KEY_B64:
+            # Load from .env (Base64 string)
             key_bytes = base64.b64decode(KALSHI_PRIVATE_KEY_B64)
         elif KALSHI_PRIVATE_KEY_PATH:
+            # Load from file
             with open(KALSHI_PRIVATE_KEY_PATH, "rb") as key_file:
                 key_bytes = key_file.read()
         else:
@@ -64,22 +62,33 @@ def sign_request(message: str) -> str:
     return base64.b64encode(signature).decode("utf-8")
 
 
-def _build_timestamp(unit: str) -> str:
-    if unit == "s":
-        return str(int(time.time()))
+def _build_timestamp() -> str:
+    """Return current timestamp in milliseconds (required by Kalshi)."""
     return str(int(time.time() * 1000))
 
 
-def build_ws_headers(ws_url: str, timestamp: str) -> dict[str, str]:
-    """Build websocket auth headers using Kalshi's access signature scheme."""
+def build_headers(method: str, url: str) -> dict[str, str]:
+    """Generic header builder for both REST and WebSocket."""
     _ensure_credentials()
-    parsed = urlparse(ws_url)
-    message = f"{timestamp}GET{parsed.path}"
+    timestamp = _build_timestamp()
+    
+    # Extract the path (e.g., /trade-api/v2/portfolio/orders) without query params
+    parsed = urlparse(url)
+    path = parsed.path 
+    
+    # Signature format: timestamp + method + path
+    message = f"{timestamp}{method}{path}"
+    
+    # DEBUG: Print what we are signing to help troubleshoot 401s
+    print(f"DEBUG SIGNING: {message}")
+
     signature = sign_request(message)
+    
     return {
         "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
         "KALSHI-ACCESS-TIMESTAMP": timestamp,
         "KALSHI-ACCESS-SIGNATURE": signature,
+        "Content-Type": "application/json",
     }
 
 
@@ -87,34 +96,29 @@ async def kalshi_ws_stream(
     session: aiohttp.ClientSession,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield messages from the Kalshi websocket."""
-    last_error: Exception | None = None
-    attempts = [
-        ("ms", "ms", True),
-        ("s", "s", True),
-        ("s", "ms", True),
-        ("ms", "s", True),
-        ("ms", "ms", False),
-        ("s", "s", False),
-    ]
-    for header_unit, payload_unit, use_headers in attempts:
-        header_ts = _build_timestamp(header_unit)
-        headers = build_ws_headers(API.kalshi_ws_url, header_ts) if use_headers else None
-        try:
-            async with session.ws_connect(
-                API.kalshi_ws_url, headers=headers, heartbeat=15
-            ) as ws:
-                async for msg in ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        yield json.loads(msg.data)
-                    elif msg.type == aiohttp.WSMsgType.ERROR:
-                        break
-            return
-        except aiohttp.WSServerHandshakeError as exc:
-            last_error = exc
-            if exc.status != 401:
-                break
-    if last_error is not None:
-        raise last_error
+    # Build headers for the WebSocket Handshake (GET request upgrade)
+    headers = build_headers("GET", API.kalshi_ws_url)
+    
+    # Remove Content-Type for WS handshake as it can confuse some servers
+    headers.pop("Content-Type", None)
+
+    try:
+        async with session.ws_connect(
+            API.kalshi_ws_url, headers=headers, heartbeat=15
+        ) as ws:
+            print(f"Connected to Kalshi WS at {API.kalshi_ws_url}")
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    yield json.loads(msg.data)
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    print(f"Kalshi WS Error: {msg.data}")
+                    break
+    except aiohttp.WSServerHandshakeError as e:
+        if e.status == 401:
+            print("\nCRITICAL: 401 UNAUTHORIZED")
+            print("Most likely cause: System Clock is out of sync.")
+            print("Run this command in terminal: sudo date -s \"$(wget -qSO- --max-redirect=0 google.com 2>&1 | grep Date: | cut -d' ' -f5-8)Z\"")
+        raise e
 
 
 async def place_limit_order(
@@ -124,9 +128,7 @@ async def place_limit_order(
     price: int,
     quantity: int,
 ) -> dict[str, Any]:
-    """Submit a limit order to Kalshi."""
-    _ensure_credentials()
-    api_key = _api_key_value()
+    """Submit a limit order to Kalshi using RSA-PSS signatures."""
     payload = {
         "ticker": ticker,
         "side": side,
@@ -134,7 +136,14 @@ async def place_limit_order(
         "price": price,
         "count": quantity,
     }
-    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    # FIX: Use RSA headers instead of Bearer token
+    headers = build_headers("POST", KALSHI_ORDER_URL)
+
     async with session.post(KALSHI_ORDER_URL, json=payload, headers=headers) as resp:
+        # Print error details if it fails
+        if resp.status != 201:
+            text = await resp.text()
+            print(f"Order Failed ({resp.status}): {text}")
         resp.raise_for_status()
         return await resp.json()
