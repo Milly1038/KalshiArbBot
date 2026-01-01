@@ -21,11 +21,10 @@ def _ensure_credentials() -> None:
         raise RuntimeError(
             "KALSHI_KEY_ID is not set. This is the API key id shown in the Kalshi UI."
         )
-    if not KALSHI_API_KEY:
-        raise RuntimeError(
-            "KALSHI_API_KEY is not set. This is a separate API key value and is not "
-            "the same as the API key id."
-        )
+
+
+def _api_key_value() -> str:
+    return KALSHI_API_KEY or KALSHI_KEY_ID
 
 
 def _load_private_key() -> Any:
@@ -52,13 +51,14 @@ def sign_request(message: str) -> str:
 def build_auth_payload() -> dict[str, Any]:
     _ensure_credentials()
     timestamp = str(int(time.time() * 1000))
-    message = f"{timestamp}{KALSHI_API_KEY}"
+    api_key = _api_key_value()
+    message = f"{timestamp}{api_key}"
     signature = sign_request(message)
     return {
         "id": KALSHI_KEY_ID,
         "timestamp": timestamp,
         "signature": signature,
-        "api_key": KALSHI_API_KEY,
+        "api_key": api_key,
     }
 
 
@@ -99,6 +99,7 @@ async def place_limit_order(
 ) -> dict[str, Any]:
     """Submit a limit order to Kalshi."""
     _ensure_credentials()
+    api_key = _api_key_value()
     payload = {
         "ticker": ticker,
         "side": side,
@@ -106,7 +107,7 @@ async def place_limit_order(
         "price": price,
         "count": quantity,
     }
-    headers = {"Authorization": f"Bearer {KALSHI_API_KEY}"}
+    headers = {"Authorization": f"Bearer {api_key}"}
     async with session.post(KALSHI_ORDER_URL, json=payload, headers=headers) as resp:
         resp.raise_for_status()
         return await resp.json()
