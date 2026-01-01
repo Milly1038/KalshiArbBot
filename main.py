@@ -1,4 +1,4 @@
-"""Entry point for the high-frequency arbitrage bot."""
+"""Entry point for the high-frequency sniper bot."""
 from __future__ import annotations
 
 import asyncio
@@ -14,10 +14,11 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from config import BANKROLL, MAX_RISK_PER_TRADE, MIN_EDGE
+from config import BANKROLL, EV_THRESHOLD, KELLY_MULTIPLIER
 from gather_data import odds_ws_feed
-from kalshi_data import kalshi_ws_stream
+from kalshi_data import kalshi_ws_stream, place_limit_order
 from mapping import MarketMapper
+from math_engine import devig_two_way, kelly_bet_size
 
 console = Console()
 
@@ -25,80 +26,105 @@ console = Console()
 @dataclass
 class BotState:
     bankroll: float = BANKROLL
-    opportunities: list[dict[str, Any]] = field(default_factory=list)
+    signals: list[dict[str, Any]] = field(default_factory=list)
     logs: list[str] = field(default_factory=list)
+    kalshi_prices: dict[str, int] = field(default_factory=dict)
 
     def log(self, message: str) -> None:
         self.logs.append(message)
         self.logs[:] = self.logs[-10:]
 
 
-def american_to_decimal(odds: int) -> float:
-    if odds > 0:
-        return 1 + (odds / 100)
-    return 1 + (100 / abs(odds))
-
-
-def hedge_size(kalshi_contracts: float, sportsbook_american_odds: int) -> float:
-    decimal_odds = american_to_decimal(sportsbook_american_odds)
-    return (kalshi_contracts * 1.0) / decimal_odds
-
-
 def build_dashboard(state: BotState) -> Layout:
     layout = Layout()
     layout.split_column(
-        Layout(name="top", size=8),
+        Layout(name="top", size=10),
         Layout(name="bottom"),
     )
-    layout["top"].split_row(Layout(name="opps"), Layout(name="bankroll", size=30))
+    layout["top"].split_row(Layout(name="signals"), Layout(name="bankroll", size=30))
 
-    opps_table = Table(title="Live Opportunities", box=box.SIMPLE)
-    opps_table.add_column("Market")
-    opps_table.add_column("Edge")
-    opps_table.add_column("Hedge")
-    for opp in state.opportunities[-5:]:
-        opps_table.add_row(
-            opp.get("market", "-"),
-            f"{opp.get('edge', 0):.2%}",
-            f"{opp.get('hedge', 0):.2f}",
+    signals_table = Table(title="Live EV Signals", box=box.SIMPLE)
+    signals_table.add_column("Market")
+    signals_table.add_column("Edge")
+    signals_table.add_column("Bet")
+    for signal in state.signals[-5:]:
+        signals_table.add_row(
+            signal.get("market", "-"),
+            f"{signal.get('edge', 0):.2%}",
+            f"${signal.get('size', 0):.2f}",
         )
 
     bankroll_panel = Panel(
-        f"${state.bankroll:,.2f}\nMax Risk: ${MAX_RISK_PER_TRADE:,.2f}",
+        f"${state.bankroll:,.2f}\nKelly x {KELLY_MULTIPLIER:.2f}",
         title="Bankroll",
         box=box.ROUNDED,
     )
 
-    logs_table = Table(title="Logs", box=box.SIMPLE)
+    logs_table = Table(title="Sniper Log", box=box.SIMPLE)
     logs_table.add_column("Message")
     for line in state.logs[-10:]:
         logs_table.add_row(line)
 
-    layout["opps"].update(opps_table)
+    layout["signals"].update(signals_table)
     layout["bankroll"].update(bankroll_panel)
     layout["bottom"].update(logs_table)
     return layout
 
 
-async def process_kalshi_feed(state: BotState, mapper: MarketMapper) -> None:
+async def process_kalshi_feed(state: BotState) -> None:
     async for message in kalshi_ws_stream(state.session):  # type: ignore[attr-defined]
+        if message.get("type") == "price":
+            ticker = message.get("ticker")
+            price = message.get("price")
+            if ticker and price is not None:
+                state.kalshi_prices[ticker] = int(price)
         state.log(f"Kalshi update: {message.get('type', 'unknown')}")
         await asyncio.sleep(0)
 
 
-async def process_odds_feed(state: BotState, queue: asyncio.Queue[dict[str, Any]]) -> None:
+async def process_odds_feed(
+    state: BotState, mapper: MarketMapper, queue: asyncio.Queue[dict[str, Any]]
+) -> None:
     while True:
         payload = await queue.get()
-        market = payload.get("market", "unknown")
-        odds = int(payload.get("odds", 100))
-        kalshi_contracts = float(payload.get("kalshi_contracts", 1))
-        hedge = hedge_size(kalshi_contracts, odds)
-        edge = float(payload.get("edge", 0.0))
-        if edge >= MIN_EDGE:
-            state.opportunities.append(
-                {"market": market, "edge": edge, "hedge": hedge}
-            )
-            state.log(f"Opportunity: {market} edge {edge:.2%}")
+        team_a = payload.get("team_a")
+        team_b = payload.get("team_b")
+        odds_a = payload.get("odds_a")
+        odds_b = payload.get("odds_b")
+        if not all([team_a, team_b, odds_a, odds_b]):
+            queue.task_done()
+            continue
+
+        fair_a, _ = devig_two_way(int(odds_a), int(odds_b))
+        market = mapper.find_market(team_a)
+        if not market:
+            state.log(f"No Kalshi market for {team_a}")
+            queue.task_done()
+            continue
+
+        kalshi_price = state.kalshi_prices.get(market.ticker)
+        if kalshi_price is None:
+            queue.task_done()
+            continue
+
+        kalshi_prob = kalshi_price / 100
+        edge = fair_a - kalshi_prob
+        if edge >= EV_THRESHOLD:
+            payout = (1 - kalshi_prob) / kalshi_prob if kalshi_prob > 0 else 0
+            size = kelly_bet_size(state.bankroll, edge, payout, KELLY_MULTIPLIER)
+            if size > 0:
+                contracts = int(size)
+                await place_limit_order(
+                    state.session, market.ticker, "buy", int(kalshi_price), contracts
+                )
+                state.bankroll -= contracts
+                state.signals.append(
+                    {"market": market.ticker, "edge": edge, "size": size}
+                )
+                state.log(
+                    f"Sniped {market.ticker} @ {kalshi_price} for {contracts}"
+                )
+
         queue.task_done()
 
 
@@ -122,9 +148,9 @@ async def main() -> None:
 
         tasks = [
             asyncio.create_task(odds_ws_feed(session, queue)),
-            asyncio.create_task(process_odds_feed(state, queue)),
+            asyncio.create_task(process_odds_feed(state, mapper, queue)),
             asyncio.create_task(dashboard_loop(state)),
-            asyncio.create_task(process_kalshi_feed(state, mapper)),
+            asyncio.create_task(process_kalshi_feed(state)),
         ]
 
         try:

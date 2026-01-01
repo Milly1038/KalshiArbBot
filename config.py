@@ -1,4 +1,4 @@
-"""Centralized configuration for the arbitrage bot."""
+"""Centralized configuration for the sniper bot."""
 from __future__ import annotations
 
 import os
@@ -31,12 +31,15 @@ API = API_CONFIGS.get(ENV, API_CONFIGS["DEMO"])
 
 KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
 KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID", "")
-KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "kalshi.key")
+KALSHI_PRIVATE_KEY_B64 = os.getenv("KALSHI_PRIVATE_KEY_B64", "")
 
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 
 BANKROLL = float(os.getenv("BANKROLL", "1000"))
-MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "50"))
-MIN_EDGE = float(os.getenv("MIN_EDGE", "0.02"))
+EV_THRESHOLD = float(os.getenv("EV_THRESHOLD", "0.05"))
+KELLY_MULTIPLIER = float(os.getenv("KELLY_MULTIPLIER", "0.2"))
 
 KALSHI_MARKETS_URL = f"{API.kalshi_rest_base}/trade-api/v2/markets"
+KALSHI_ORDER_URL = f"{API.kalshi_rest_base}/trade-api/v2/portfolio/orders"
+
+SHARP_BOOKS = {"DraftKings", "Pinnacle", "FanDuel"}

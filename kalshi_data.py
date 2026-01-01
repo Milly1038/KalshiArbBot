@@ -10,7 +10,7 @@ import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from config import API, KALSHI_API_KEY, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PATH
+from config import API, KALSHI_API_KEY, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_B64, KALSHI_ORDER_URL
 
 _PRIVATE_KEY = None
 
@@ -18,10 +18,10 @@ _PRIVATE_KEY = None
 def _load_private_key() -> Any:
     global _PRIVATE_KEY
     if _PRIVATE_KEY is None:
-        with open(KALSHI_PRIVATE_KEY_PATH, "rb") as key_file:
-            _PRIVATE_KEY = serialization.load_pem_private_key(
-                key_file.read(), password=None
-            )
+        if not KALSHI_PRIVATE_KEY_B64:
+            raise RuntimeError("KALSHI_PRIVATE_KEY_B64 is not set")
+        key_bytes = base64.b64decode(KALSHI_PRIVATE_KEY_B64)
+        _PRIVATE_KEY = serialization.load_pem_private_key(key_bytes, password=None)
     return _PRIVATE_KEY
 
 
@@ -59,3 +59,24 @@ async def kalshi_ws_stream(
                 yield json.loads(msg.data)
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
+
+
+async def place_limit_order(
+    session: aiohttp.ClientSession,
+    ticker: str,
+    side: str,
+    price: int,
+    quantity: int,
+) -> dict[str, Any]:
+    """Submit a limit order to Kalshi."""
+    payload = {
+        "ticker": ticker,
+        "side": side,
+        "type": "limit",
+        "price": price,
+        "count": quantity,
+    }
+    headers = {"Authorization": f"Bearer {KALSHI_API_KEY}"}
+    async with session.post(KALSHI_ORDER_URL, json=payload, headers=headers) as resp:
+        resp.raise_for_status()
+        return await resp.json()
