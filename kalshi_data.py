@@ -11,7 +11,14 @@ import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from config import API, KALSHI_API_KEY, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_B64, KALSHI_ORDER_URL
+from config import (
+    API,
+    KALSHI_API_KEY,
+    KALSHI_KEY_ID,
+    KALSHI_ORDER_URL,
+    KALSHI_PRIVATE_KEY_B64,
+    KALSHI_PRIVATE_KEY_PATH,
+)
 
 _PRIVATE_KEY = None
 
@@ -30,9 +37,15 @@ def _api_key_value() -> str:
 def _load_private_key() -> Any:
     global _PRIVATE_KEY
     if _PRIVATE_KEY is None:
-        if not KALSHI_PRIVATE_KEY_B64:
-            raise RuntimeError("KALSHI_PRIVATE_KEY_B64 is not set")
-        key_bytes = base64.b64decode(KALSHI_PRIVATE_KEY_B64)
+        if KALSHI_PRIVATE_KEY_B64:
+            key_bytes = base64.b64decode(KALSHI_PRIVATE_KEY_B64)
+        elif KALSHI_PRIVATE_KEY_PATH:
+            with open(KALSHI_PRIVATE_KEY_PATH, "rb") as key_file:
+                key_bytes = key_file.read()
+        else:
+            raise RuntimeError(
+                "Set KALSHI_PRIVATE_KEY_B64 or KALSHI_PRIVATE_KEY_PATH for Kalshi auth"
+            )
         _PRIVATE_KEY = serialization.load_pem_private_key(key_bytes, password=None)
     return _PRIVATE_KEY
 

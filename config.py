@@ -4,6 +4,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 ENV = os.getenv("KALSHI_ENV", "DEMO").upper()
 
 
@@ -37,6 +41,7 @@ API = ApiConfig(
 KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
 KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID", "")
 KALSHI_PRIVATE_KEY_B64 = os.getenv("KALSHI_PRIVATE_KEY_B64", "")
+KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "")
 
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
 
