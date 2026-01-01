@@ -1,0 +1,6 @@
+aiohttp==3.9.5
+cryptography==42.0.8
+orjson==3.10.7
+rapidfuzz==3.9.7
+rich==13.7.1
+uvloop==0.20.0
