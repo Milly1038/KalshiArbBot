@@ -30,11 +30,18 @@ class MarketMapper:
         async with self._lock:
             if self._entries:
                 return
-            params = {"status": "active", "limit": 200}
             entries: list[MarketEntry] = []
-            async with session.get(KALSHI_MARKETS_URL, params=params) as resp:
-                resp.raise_for_status()
-                payload = orjson.loads(await resp.read())
+            payload = None
+            for status in ("active", "open"):
+                params = {"status": status, "limit": 200}
+                async with session.get(KALSHI_MARKETS_URL, params=params) as resp:
+                    if resp.status == 400 and status == "active":
+                        continue
+                    resp.raise_for_status()
+                    payload = orjson.loads(await resp.read())
+                    break
+            if payload is None:
+                raise RuntimeError("Failed to load Kalshi markets.")
             for market in payload.get("markets", []):
                 title = market.get("title", "")
                 ticker = market.get("ticker", "")
