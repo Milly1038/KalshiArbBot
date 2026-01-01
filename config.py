@@ -4,24 +4,19 @@ import os
 from dataclasses import dataclass
 
 # --- 🏦 MONEY MANAGEMENT ---
-BANKROLL = 26.00       # Your starting amount
-MAX_RISK_PER_TRADE = 2.00   # Max bet per snipe
-MIN_EDGE = 0.02             # Minimum 2% edge required to fire
+BANKROLL = 26.00
+MAX_RISK_PER_TRADE = 2.00
+MIN_EDGE = 0.02
 
 # --- 🌍 ENVIRONMENT ---
-# Set to "PROD" to use real money and real API endpoints
 ENV = os.getenv("KALSHI_ENV", "PROD").upper() 
 
 # --- 🔑 API KEYS ---
-# PASTE YOUR REAL KEYS HERE IF NOT USING ENV VARIABLES
-KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "YOUR_KALSHI_KEY_ID_HERE")
-KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID", "YOUR_KALSHI_KEY_ID_HERE")
+KALSHI_API_KEY = os.getenv("KALSHI_API_KEY")
+KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "kalshi.key") 
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
-# Your "oddspapi.io" key
-ODDS_API_KEY = os.getenv("ODDS_API_KEY", "YOUR_ODDS_API_KEY_HERE")
-
-# Backwards compatibility map (for gather_data.py)
 API_KEYS = {
     "THE_ODDS_API": ODDS_API_KEY,
     "KALSHI_ID": KALSHI_KEY_ID
@@ -41,40 +36,29 @@ API_CONFIGS = {
         odds_ws_url="wss://app.oddsapi.io/ws/v1", 
     ),
     "PROD": ApiConfig(
+        # WE KNOW THIS DOMAIN RESOLVES:
         kalshi_rest_base="https://api.elections.kalshi.com",
         kalshi_ws_url="wss://api.elections.kalshi.com/trade-api/ws/v2",
         odds_ws_url="wss://app.oddsapi.io/ws/v1", 
     ),
 }
 
-API = API_CONFIGS.get(ENV, API_CONFIGS["DEMO"])
+API = API_CONFIGS.get(ENV, API_CONFIGS["PROD"])
 
 # --- ⚙️ BETTING SETTINGS ---
 BETTING_SETTINGS = {
-    # UPDATED: Using the Numeric IDs required by your API provider
-    "LEAGUES": [
-        "10", # Soccer/Generic (Verify based on your API dashboard)
-        "11", # Basketball (NBA usually)
-        "14", # Hockey (NHL)
-        "15"  # Football (NFL/NCAAF)
-    ],
-    
+    "LEAGUES": ["10", "11", "14", "15"],
     "REGIONS": "us",
-    "MARKETS": "h2h",  # Moneyline only for snipes
+    "MARKETS": "h2h",
     "ODDS_FORMAT": "american"
 }
 
 # --- 🛡️ FILTERS ---
 FILTERS = {
-    "TARGET_SPORTSBOOKS": [
-        "draftkings", 
-        "fanduel", 
-        "betmgm", 
-        "hardrockbet",
-        "caesars"
-    ],
-    "MIN_LIQUIDITY": 10,       # Lowered for sniping (we only need $2 liquidity)
-    "MIN_PROFIT_PCT": 2.0      # Minimum edge to trigger
+    "TARGET_SPORTSBOOKS": ["draftkings", "fanduel", "betmgm", "hardrockbet", "caesars"],
+    "MIN_LIQUIDITY": 10,
+    "MIN_PROFIT_PCT": 2.0
 }
-# config.py (Add this to the end of the file)
+
+# REQUIRED MARKET MAPPER URL
 KALSHI_MARKETS_URL = f"{API.kalshi_rest_base}/trade-api/v2/markets"

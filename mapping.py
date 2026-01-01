@@ -30,7 +30,7 @@ class MarketMapper:
         async with self._lock:
             if self._entries:
                 return
-            params = {"status": "active", "limit": 200}
+            params = {"status": "open", "limit": 200}
             entries: list[MarketEntry] = []
             async with session.get(KALSHI_MARKETS_URL, params=params) as resp:
                 resp.raise_for_status()
