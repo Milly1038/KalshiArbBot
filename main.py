@@ -171,22 +171,27 @@ async def process_odds_feed(state: BotState, queue: asyncio.Queue[dict[str, Any]
                         
                         if edge >= MIN_EDGE:
                             # D. EXECUTE SNIPE
-                            bet_size_contracts = 10 # Fixed size for safety start
+                            # Calculate max contracts based on $2 limit
+                            # price is in cents (e.g. 50), Max Risk is dollars (2.00)
                             
-                            # Log the signal
-                            state.log(f"⚡ SIGNAL: {ticker} | Edge: {edge:.2%} | SB: {true_prob:.2f} vs K: {k_prob:.2f}")
+                            price_dollars = k_price_cents / 100.0
+                            count = int(MAX_RISK_PER_TRADE / price_dollars)
                             
-                            # FIRE!
-                            asyncio.create_task(
-                                execute_snipe(state.session, ticker, "yes", bet_size_contracts, k_price_cents, state)
-                            )
-                            
-                            # Add to Dashboard
-                            state.opportunities.append({
-                                "market": ticker,
-                                "edge": edge,
-                                "hedge": 0.0 # Naked Snipe
-                            })
+                            if count > 0:
+                                # Log the signal
+                                state.log(f"⚡ SIGNAL: {ticker} | Edge: {edge:.2%} | SB: {true_prob:.2f} vs K: {k_prob:.2f}")
+                                
+                                # FIRE!
+                                asyncio.create_task(
+                                    execute_snipe(state.session, ticker, "yes", count, k_price_cents, state)
+                                )
+                                
+                                # Add to Dashboard
+                                state.opportunities.append({
+                                    "market": ticker,
+                                    "edge": edge,
+                                    "hedge": 0.0 # Naked Snipe
+                                })
 
         queue.task_done()
 
