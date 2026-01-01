@@ -48,9 +48,14 @@ def sign_request(message: str) -> str:
     return base64.b64encode(signature).decode("utf-8")
 
 
-def build_auth_payload() -> dict[str, Any]:
+def _build_timestamp(unit: str) -> str:
+    if unit == "s":
+        return str(int(time.time()))
+    return str(int(time.time() * 1000))
+
+
+def build_auth_payload(timestamp: str) -> dict[str, Any]:
     _ensure_credentials()
-    timestamp = str(int(time.time() * 1000))
     api_key = _api_key_value()
     message = f"{timestamp}{api_key}"
     signature = sign_request(message)
@@ -62,11 +67,10 @@ def build_auth_payload() -> dict[str, Any]:
     }
 
 
-def build_ws_headers(ws_url: str) -> dict[str, str]:
+def build_ws_headers(ws_url: str, timestamp: str) -> dict[str, str]:
     """Build websocket auth headers using Kalshi's access signature scheme."""
     _ensure_credentials()
     parsed = urlparse(ws_url)
-    timestamp = str(int(time.time() * 1000))
     message = f"{timestamp}GET{parsed.path}"
     signature = sign_request(message)
     return {
@@ -80,14 +84,38 @@ async def kalshi_ws_stream(
     session: aiohttp.ClientSession,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield messages from the Kalshi websocket."""
-    headers = build_ws_headers(API.kalshi_ws_url)
-    async with session.ws_connect(API.kalshi_ws_url, headers=headers, heartbeat=15) as ws:
-        await ws.send_str(json.dumps({"type": "auth", "data": build_auth_payload()}))
-        async for msg in ws:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                yield json.loads(msg.data)
-            elif msg.type == aiohttp.WSMsgType.ERROR:
+    last_error: Exception | None = None
+    attempts = [
+        ("ms", "ms", True),
+        ("s", "s", True),
+        ("s", "ms", True),
+        ("ms", "s", True),
+        ("ms", "ms", False),
+        ("s", "s", False),
+    ]
+    for header_unit, payload_unit, use_headers in attempts:
+        header_ts = _build_timestamp(header_unit)
+        payload_ts = _build_timestamp(payload_unit)
+        headers = build_ws_headers(API.kalshi_ws_url, header_ts) if use_headers else None
+        try:
+            async with session.ws_connect(
+                API.kalshi_ws_url, headers=headers, heartbeat=15
+            ) as ws:
+                await ws.send_str(
+                    json.dumps({"type": "auth", "data": build_auth_payload(payload_ts)})
+                )
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        yield json.loads(msg.data)
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        break
+            return
+        except aiohttp.WSServerHandshakeError as exc:
+            last_error = exc
+            if exc.status != 401:
                 break
+    if last_error is not None:
+        raise last_error
 
 
 async def place_limit_order(
